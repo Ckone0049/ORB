@@ -1,0 +1,457 @@
+//+------------------------------------------------------------------+
+//|                                                 ORBStrategie.mq4 |
+//|                        Copyright 2016, KirschTrading             |
+//|                                             https://www.mql5.com |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2016, KirschTrading"
+#property link      "https://www.mql5.com"
+#property version   "1.00"
+#property strict
+
+int DIGITS = 4;
+datetime TIME;
+#define MAGICMA  0815
+//Inputs in die Strategie
+input int      StundeStartRange=9;
+input int      StundeEndeRange=10;
+//Klassendefinitionen
+class orb_settings
+  {
+  private:
+   double m_spread;
+   int m_TrailingStopLoss;
+   //int DIGITS = 4;
+  public:
+   //void refresh();
+   double orb_high;         // values of the profit fixing price
+   double orb_low;         // value of the protective stop price
+   uchar  slippage;     // value of the acceptable slippage
+   
+   //void refresh();
+void refresh(void)
+   {
+      orb_high = NormalizeDouble(iCustom(NULL, PERIOD_M5, "ORB",1,0),DIGITS);
+      orb_low = NormalizeDouble(iCustom(NULL, PERIOD_M5, "ORB",0,0),DIGITS);
+      m_spread = orb_high-orb_low;
+      m_TrailingStopLoss = (int)m_spread/Point;
+   };
+
+  double spread() 
+   { 
+      m_spread = orb_high-orb_low;
+      return m_spread;
+   };
+   //double spread(void) { return m_spread;  };
+   int TrailingStopLoss(void)
+   {
+      m_TrailingStopLoss = (int)m_spread/Point;
+      return m_TrailingStopLoss;
+   };
+   int spreadPoints(void) 
+   { 
+      m_TrailingStopLoss = (int)m_spread/Point;
+      return m_TrailingStopLoss; 
+   };
+   orb_settings(void)  {};
+  };
+ 
+class tradetime
+{
+   private:
+   datetime m_PositionoeffnenVON;
+   datetime m_PositionoeffnenBIS;
+   int m_PositionoeffnenVON_Zeitwert;
+   int m_PositionoeffnenBIS_Zeitwert;
+   public:
+   void setzePositionoeffnenVON(datetime zeit)
+   {
+      m_PositionoeffnenVON = zeit;
+      m_PositionoeffnenVON_Zeitwert = TimeHour(zeit)*60 + TimeMinute(zeit);
+   };
+   void setzePositionoeffnenBIS(datetime zeit)
+   {
+      m_PositionoeffnenBIS = zeit;
+      m_PositionoeffnenBIS_Zeitwert = TimeHour(zeit)*60 + TimeMinute(zeit);
+   };  
+   bool  Positionszeit(datetime zeit)
+   {
+   //hier wird geprüft ob wir innerhalb der Zeitspanne sind zu der Positionen eröffnet werden sollen
+      int zeitwert;
+      zeitwert = TimeHour(zeit)*60 + TimeMinute(zeit);
+      if ((zeitwert >= m_PositionoeffnenVON_Zeitwert) && (zeitwert < m_PositionoeffnenBIS_Zeitwert)) { return true ; };
+      return false;
+   };
+   
+};
+ 
+
+// Variablen die den Experten steuern:
+double AnzahlKontrakte=0.1 ;
+int TrailingStopLoss;
+int Stunde_Open=11,  Minute_Open=0, Stunde_Close, Minute_Close;
+bool OrderMinBuyplatzieren, OrderMaxBuyplatzieren;
+orb_settings orb;
+tradetime handelszeit;
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+//---
+
+   orb.refresh();
+   TrailingStopLoss = orb.TrailingStopLoss(); // Explizit als Integer weiter
+   handelszeit.setzePositionoeffnenVON("08:00");
+   handelszeit.setzePositionoeffnenBIS("24:00");
+         AnzahlKontrakte = 0.1; //Mehr geht nicht, max Tagesverlust etwa 30 EUR!! 
+      Stunde_Open = 02; // Stunde zu der die Order platziert wird
+      Minute_Open = 00; // Stunde zu der die Order platziert wird
+      Stunde_Close = 6; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+      Minute_Close = 00; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+  // Alert (handelszeit.m_minute);
+   if (Symbol() == "DAX30")
+   {
+      AnzahlKontrakte = 0.1; //Mehr geht nicht, max Tagesverlust etwa 30 EUR!! 
+      Stunde_Open = 08; // Stunde zu der die Order platziert wird
+      Minute_Open = 00; // Stunde zu der die Order platziert wird
+   handelszeit.setzePositionoeffnenVON("11:00");
+   handelszeit.setzePositionoeffnenBIS("22:00");
+      Stunde_Close = 22; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+      Minute_Close = 30; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+   }
+   if (Symbol() == "ESX50")
+   {
+      AnzahlKontrakte = 0.1; //Mehr geht nicht, max Tagesverlust etwa 30 EUR!! 
+      Stunde_Open = 11; // Stunde zu der die Order platziert wird
+      Minute_Open = 00; // Stunde zu der die Order platziert wird
+      Stunde_Close = 22; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+      Minute_Close = 30; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+   }
+   if (Symbol() == "SP500")
+   {
+      AnzahlKontrakte = 0.2; //Mehr geht nicht, max Tagesverlust etwa 30 EUR!! 
+      Stunde_Open = 17; // Stunde zu der die Order platziert wird
+      Minute_Open = 30; // Stunde zu der die Order platziert wird
+      handelszeit.setzePositionoeffnenVON("17:30");
+      handelszeit.setzePositionoeffnenBIS("23:00");
+      Stunde_Close = 23; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+      Minute_Close = 00; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+   }
+   if (Symbol() == "NAS100")
+   {
+      AnzahlKontrakte = 0.1; //Mehr geht nicht, max Tagesverlust etwa 30 EUR!! 
+      Stunde_Open = 23; // Stunde zu der die Order platziert wird
+      Minute_Open = 33; // Stunde zu der die Order platziert wird
+   handelszeit.setzePositionoeffnenVON("23:33");
+   handelszeit.setzePositionoeffnenBIS("24:00");
+      Stunde_Close = 24; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+      Minute_Close = 00; // Stunde zu der Orders gelöscht werden und offene Trades geschlossen werden
+   }
+   OrderMinBuyplatzieren = true;
+   OrderMaxBuyplatzieren = true;
+
+//---
+   return(INIT_SUCCEEDED);
+  }
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+//---
+   
+  }
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+
+void OnTick()
+  {
+  datetime Zeit;
+  double Spread,orb_high ,orb_low;
+//---
+// Checke zunächst ob offene Orders existieren
+   TrailingPositionsBuy(TrailingStopLoss);
+   TrailingPositionsSell(TrailingStopLoss);
+//Prüfe dann ob die korrekte Zeit erreicht ist
+// Prüfe dann 
+   Zeit = Time[0];
+
+   if (handelszeit.Positionszeit(Zeit))
+   {
+        if (AnzahlTrades("BUY")==0)
+         {
+            OrderMinBuyplatzieren = false;
+            orb.refresh();
+            //Es besteht noch das Problem, dass der minimale Abstand nicht eingehalten wird und die Order somit nicht platziert werden kann
+            SendBuyOrder();
+
+            // ermittle noch den neuen StopLoss
+            TrailingStopLoss = orb.TrailingStopLoss(); //explizit als Integer weiter
+         }
+        if (AnzahlTrades("SELL")==0)
+         {
+            OrderMinBuyplatzieren = false;
+            orb.refresh();
+            //Es besteht noch das Problem, dass der minimale Abstand nicht eingehalten wird und die Order somit nicht platziert werden kann
+            SendSellOrder();
+
+            // ermittle noch den neuen StopLoss
+            TrailingStopLoss = orb.TrailingStopLoss(); //explizit als Integer weiter
+         }
+
+      
+      if (TimeMinute(Zeit) > Minute_Open)
+      {
+         OrderMinBuyplatzieren = true;
+      }
+   }
+   //lösche offene Orders
+      if (TimeHour(Zeit)==Stunde_Close)
+      {
+      if (TimeMinute(Zeit)>=Minute_Close)
+      {
+         for(int i=0;i<OrdersTotal();i++)
+            {
+               if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) break;
+
+
+               if(OrderSymbol()==Symbol() && OrderMagicNumber()==MAGICMA)
+               {
+               if(OrderType()==OP_BUYSTOP)  OrderDelete(OrderTicket());
+               if(OrderType()==OP_SELLSTOP) 
+               {
+                  OrderDelete(OrderTicket());
+
+               }
+               if(OrderType()==OP_BUY)
+               {
+
+                  
+                     OrderClose(OrderTicket(),OrderLots(), Bid, 3);
+                
+               }
+               if(OrderType()==OP_SELL)
+               {
+
+                     OrderClose(OrderTicket(),OrderLots(), Ask, 3);
+                  
+               }              
+               //if(OrderType()==OP_SELL) sells++;
+               }
+            }
+      }
+
+   }
+
+ }
+//+------------------------------------------------------------------+
+//------------------------------------------------
+//+------------------------------------------------------------------+
+//| Check for open order conditions                                  |
+//+------------------------------------------------------------------+
+
+//---
+int AnzahlTrades(string BUYSELL)
+{
+int BUY,SELL;
+BUY=0;
+SELL=0;
+         for(int i=0;i<OrdersTotal();i++)
+            {
+               if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) break;
+
+
+               if(OrderSymbol()==Symbol() && OrderMagicNumber()==MAGICMA)
+               {
+               if(OrderType()==OP_BUYSTOP)  
+               {
+                  BUY++;
+               }
+               if(OrderType()==OP_SELLSTOP) 
+               {
+                  SELL++;
+
+               }
+               if(OrderType()==OP_BUY)
+               {
+                  BUY++;
+        
+               }
+               if(OrderType()==OP_SELL)
+               {
+                 SELL++;                  
+               }              
+               
+               }
+            }
+            if (BUYSELL == "SELL") { return SELL; };
+            if (BUYSELL == "BUY") { return BUY; };
+            return 0;
+}
+  
+void SendSellOrder()
+  {
+//---
+   
+
+   double PriceBuy,
+   SLBuy,
+   TPBuy ;
+   double orb_high = orb.orb_high;
+   double orb_low = orb.orb_low;
+   double Spread = orb_high-orb_low;
+   // Order Buy 1: Voller Weg
+   PriceBuy = NormalizeDouble(orb_low,4);
+   SLBuy = NormalizeDouble(orb_high,4);
+   TPBuy = NormalizeDouble(orb_low-Spread,4);
+   int ticket = OrderSend(Symbol(),OP_SELLSTOP,AnzahlKontrakte,PriceBuy,3,SLBuy,TPBuy,"",MAGICMA);
+   int hm = GetLastError();
+      if(ticket<0)
+     {
+      Print("OrderSend failed with error #",GetLastError());
+     }
+   else
+      {
+      Print("OrderSend placed successfully"); 
+      WriteLog(Symbol(), orb_high, orb_low); 
+      }
+   // Order 2: Halber Weg
+   PriceBuy = NormalizeDouble(orb_low,4);
+   SLBuy = NormalizeDouble(orb_high,4);
+   TPBuy = NormalizeDouble(orb_low-Spread/2,4);
+   ticket = OrderSend(Symbol(),OP_SELLSTOP,AnzahlKontrakte,PriceBuy,3,SLBuy,TPBuy,"",MAGICMA);
+   hm = GetLastError();
+
+      if(ticket<0)
+     {
+      Print("OrderSend failed with error #",GetLastError());
+     }
+   else
+      {
+      Print("OrderSend placed successfully"); 
+      WriteLog(Symbol(), orb_high, orb_low); 
+      }
+  }
+ 
+ void SendBuyOrder()
+  {
+//---
+
+
+   double PriceBuy,
+   SLBuy,
+   TPBuy ;
+   double orb_high = orb.orb_high;
+   double orb_low = orb.orb_low;
+   double Spread = orb_high-orb_low;
+   // Order Buy 1: Voller Weg
+   PriceBuy = NormalizeDouble(orb_high,4);
+   SLBuy = NormalizeDouble(orb_low,4);
+   TPBuy = NormalizeDouble(orb_high+Spread,4);
+   int ticket = OrderSend(Symbol(),OP_BUYSTOP,AnzahlKontrakte,PriceBuy,3,SLBuy,TPBuy,"",MAGICMA);
+   int hm = GetLastError();
+      if(ticket<0)
+     {
+      Print("OrderSend failed with error #",GetLastError());
+     }
+   else
+      {
+      Print("OrderSend placed successfully"); 
+      WriteLog(Symbol(), orb_high, orb_low); 
+      }
+   // Order 2: Halber Weg
+   PriceBuy = NormalizeDouble(orb_high,4);
+   SLBuy = NormalizeDouble(orb_low,4);
+   TPBuy = NormalizeDouble(orb_high+Spread/2,4);
+   ticket = OrderSend(Symbol(),OP_BUYSTOP,AnzahlKontrakte,PriceBuy,3,SLBuy,TPBuy,"",MAGICMA);
+   hm = GetLastError();
+      if(ticket<0)
+     {
+      Print("OrderSend failed with error #",GetLastError());
+     }
+   else
+      {
+      PrintFormat("OrderSend placed successfully"); 
+      WriteLog(Symbol(), orb_high, orb_low); 
+      }  
+  }
+ void TrailingPositionsBuy(int TrailingStopLoss)
+ {
+ double ang, preis, punkte, dif1, dif2;
+   for (int z =0; z< OrdersTotal(); z++)
+   {
+      if (OrderSelect(z, SELECT_BY_POS , MODE_TRADES))
+      {
+         if (OrderSymbol() == Symbol() )
+         {
+            if (OrderType()==OP_BUY)
+            {
+               ang = Bid;
+               preis = OrderStopLoss();
+               punkte = Point;
+               dif1=Bid-TrailingStopLoss*Point();
+               dif2=TrailingStopLoss*Point;
+
+                  if (OrderStopLoss()<Bid-TrailingStopLoss*Point)
+                     ModifyStopLoss(Bid-TrailingStopLoss*Point);
+
+            }
+         }
+      }
+   }
+ }
+ 
+ void TrailingPositionsSell(int TrailingStopLoss)
+ {
+ double ang, preis, punkte, dif1, dif2;
+   for (int z =0; z< OrdersTotal(); z++)
+   {
+      if (OrderSelect(z, SELECT_BY_POS , MODE_TRADES))
+      {
+         if (OrderSymbol() == Symbol() )
+         {
+            if (OrderType()==OP_SELL)
+            {
+               ang = Ask;
+               preis = OrderStopLoss();
+               punkte = Point;
+               dif1=Ask-TrailingStopLoss*Point();
+               dif2=TrailingStopLoss*Point;
+
+                  if (OrderStopLoss()>Ask+TrailingStopLoss*Point)
+                     ModifyStopLoss(Ask+TrailingStopLoss*Point);
+
+            }
+         }
+      }
+   }
+ }
+ 
+ void ModifyStopLoss(double ldStopLoss)
+ {
+   bool fm;
+   fm = OrderModify(OrderTicket(), OrderOpenPrice(), ldStopLoss , OrderTakeProfit(), 0 , CLR_NONE);
+ }
+ 
+ void WriteLog(string StrSymbol, double Hoch, double Tief )
+ {
+   string subfolder="Logfile";
+   string schreibstring="";
+   double Spread = 0;
+   Spread = Hoch - Tief;
+    int filehandle=FileOpen(subfolder+"\\"+StrSymbol+".txt",FILE_WRITE|FILE_CSV);
+      if(filehandle!=INVALID_HANDLE)
+     {
+      schreibstring = "Zeit;"+ TimeCurrent()+ "; Symbol;" + StrSymbol + ";Hoch;" + Hoch + ";Tief;" + Tief + ";Spread;"+Spread;
+
+
+           FileWrite(filehandle,schreibstring);
+
+      FileClose(filehandle);
+      //Print("The file most be created in the folder "+terminal_data_path+"\\"+subfolder);
+     }
+ }
+ 
+ 
+//+------------------------------------------------------------------+
